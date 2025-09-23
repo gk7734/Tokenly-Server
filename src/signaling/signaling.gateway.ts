@@ -63,11 +63,15 @@ export class SignalingGateway
     if (data.type === 'offer') {
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment,@typescript-eslint/no-unsafe-member-access
       const clientId: string = (client as any).clientId;
-      const { type, sdp, session_id, room_id } = data;
+      const { sdp, session_id, room_id } = data;
       this.logger.log(`Received offer from ${session_id} in room ${room_id}`);
 
+      // Send offer to Axum for processing
+      this.signalingService.sendOfferToAxum(session_id, room_id, sdp);
+
+      // Also forward offer to other clients in the room
       this.signalingService.sendToRoom(clientId, {
-        type,
+        type: 'offer',
         sdp,
         session_id,
         room_id,
@@ -75,35 +79,48 @@ export class SignalingGateway
     } else if (data.type === 'answer') {
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment,@typescript-eslint/no-unsafe-member-access
       const clientId: string = (client as any).clientId;
-      const { type, sdp, session_id, room_id } = data;
+      const { sdp, session_id, room_id } = data;
       this.logger.log(`Received answer from ${session_id} in room ${room_id}`);
 
+      // Forward browser answer directly to other browsers (P2P), NOT to Axum
       this.signalingService.sendToRoom(clientId, {
-        type,
+        type: 'answer',
         sdp,
         session_id,
         room_id,
       });
+
+      this.signalingService.sendAnswerToAxum(session_id, room_id, sdp);
     } else if (data.type === 'ice-candidate') {
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment,@typescript-eslint/no-unsafe-member-access
       const clientId: string = (client as any).clientId;
-      const { type, candidate, sdpMid, sdpMLineIndex, session_id, room_id } =
-        data;
+      const { candidate, sdpMid, sdpMLineIndex, session_id, room_id } = data;
 
+      // Forward browser ICE candidate directly to other browsers (P2P), NOT to Axum
       this.signalingService.sendToRoom(clientId, {
-        type,
+        type: 'ice-candidate',
         candidate,
         sdpMid,
         sdpMLineIndex,
         session_id,
         room_id,
       });
+
+      this.signalingService.sendIceCandidateToAxum(
+        session_id,
+        room_id,
+        candidate,
+        sdpMid,
+        sdpMLineIndex,
+      );
     } else if (data.type === 'join-room') {
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment,@typescript-eslint/no-unsafe-member-access
       const clientId: string = (client as any).clientId;
       const { type, session_id, room_id } = data;
 
       const success = this.signalingService.joinRoom(clientId, room_id, client);
+      const getParticipants =
+        this.signalingService.getRoomParticipants(room_id);
       if (success) {
         this.logger.log(`Client ${session_id} joined room ${room_id}`);
 
@@ -112,13 +129,15 @@ export class SignalingGateway
             type,
             session_id,
             room_id,
+            participants: getParticipants,
             success: true,
           }),
         );
 
         this.signalingService.sendToRoom(clientId, {
           type: 'user-joined',
-          clientId: clientId,
+          session_id: clientId,
+          participants: getParticipants,
         });
       } else {
         this.logger.log(`Client ${clientId} failed to join room ${room_id}`);
